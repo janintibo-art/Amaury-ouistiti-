@@ -1,4 +1,4 @@
-name: ðŸ’ Construire l'APK Amaury Ouistiti
+name: Build Amaury Ouistiti APK
 
 on:
   push:
@@ -6,141 +6,116 @@ on:
     paths:
       - 'amaury-ouistiti-source.zip'
       - '.github/workflows/build-apk.yml'
-  workflow_dispatch:    # Permet de lancer manuellement depuis l'onglet Actions
+  workflow_dispatch:
 
 permissions:
-  contents: write        # nÃ©cessaire pour crÃ©er la release et y joindre l'APK
+  contents: write
 
 jobs:
   build:
-    name: Construire l'APK Android
+    name: Build Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      # 1. RÃ©cupÃ©rer le dÃ©pÃ´t
-      - name: ðŸ“¥ RÃ©cupÃ©rer le dÃ©pÃ´t
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. DÃ©compresser le ZIP contenant le projet
-      - name: ðŸ“¦ DÃ©compresser amaury-ouistiti-source.zip
+      - name: Unzip source archive
         run: |
           if [ ! -f amaury-ouistiti-source.zip ]; then
-            echo "âŒ Le fichier amaury-ouistiti-source.zip est introuvable Ã  la racine du dÃ©pÃ´t."
+            echo "ERROR: amaury-ouistiti-source.zip not found at repo root."
             exit 1
           fi
           mkdir -p project
           unzip -o amaury-ouistiti-source.zip -d project/
-          # Si le ZIP contient un dossier racine, dÃ©placer son contenu vers project/
           if [ -d "project/amaury-ouistiti-source" ]; then
             shopt -s dotglob
             mv project/amaury-ouistiti-source/* project/
             rmdir project/amaury-ouistiti-source
           fi
-          echo "âœ… Contenu dÃ©compressÃ© :"
+          echo "Extracted content:"
           ls -la project/
 
-      # 3. Installer Node.js (pour Capacitor)
-      - name: ðŸŸ¢ Installer Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: project/package-lock.json
 
-      # 4. Installer Java 17 (requis par Android Gradle Plugin)
-      - name: â˜• Installer JDK 17
+      - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # 5. Installer le SDK Android
-      - name: ðŸ¤– Installer Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
           packages: 'platforms;android-34 build-tools;34.0.0'
 
-      # 6. Installer les dÃ©pendances Node
-      - name: ðŸ“š Installer les dÃ©pendances npm
+      - name: Install npm dependencies
         working-directory: project
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+        run: npm install
 
-      # 7. GÃ©nÃ©rer le projet Android via Capacitor
-      - name: ðŸ”§ Initialiser le projet Android avec Capacitor
+      - name: Add Android platform with Capacitor
         working-directory: project
         run: |
-          # Si le dossier android n'existe pas, le crÃ©er
           if [ ! -d "android" ]; then
             npx cap add android
           fi
           npx cap sync android
 
-      # 8. Copier l'icÃ´ne dans les ressources Android
-      - name: ðŸŽ¨ Configurer l'icÃ´ne de l'application
+      - name: Configure app icons
         working-directory: project
         run: |
           if [ -f resources/icon.png ]; then
-            # Tailles requises pour Android : mipmap-mdpi, hdpi, xhdpi, xxhdpi, xxxhdpi
             ICON_DIR="android/app/src/main/res"
             for density in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
               dir="${density%%:*}"
               size="${density##*:}"
               target_dir="$ICON_DIR/mipmap-$dir"
               mkdir -p "$target_dir"
-              # Utiliser ImageMagick (prÃ©installÃ© sur ubuntu-latest)
               convert resources/icon.png -resize ${size}x${size} "$target_dir/ic_launcher.png"
               convert resources/icon.png -resize ${size}x${size} "$target_dir/ic_launcher_round.png"
               convert resources/icon.png -resize ${size}x${size} "$target_dir/ic_launcher_foreground.png"
             done
-            echo "âœ… IcÃ´nes Android configurÃ©es"
+            echo "Android icons configured"
           fi
 
-      # 9. Construire l'APK en mode debug (signÃ© automatiquement avec la clÃ© debug)
-      - name: ðŸ”¨ Construire l'APK
+      - name: Build APK
         working-directory: project/android
         run: |
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      # 10. Renommer l'APK pour qu'il ait un nom propre
-      - name: âœï¸ Renommer l'APK
+      - name: Rename APK
         working-directory: project/android/app/build/outputs/apk/debug
         run: |
-          ls -la
           mv app-debug.apk amaury-ouistiti.apk
-          echo "âœ… APK prÃªt : $(pwd)/amaury-ouistiti.apk"
           ls -lh amaury-ouistiti.apk
 
-      # 11. Publier l'APK en tant qu'artefact (tÃ©lÃ©chargeable depuis la page de l'action)
-      - name: ðŸ“¤ Publier l'APK comme artefact
+      - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: amaury-ouistiti-apk
           path: project/android/app/build/outputs/apk/debug/amaury-ouistiti.apk
           retention-days: 30
 
-      # 12. CrÃ©er une Release GitHub avec l'APK attachÃ© (sur push uniquement)
-      - name: ðŸš€ CrÃ©er une Release GitHub
+      - name: Create GitHub Release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Build #${{ github.run_number }} - ${{ github.event.head_commit.message }}
+          name: Build ${{ github.run_number }}
           body: |
-            APK construit automatiquement Ã  partir du commit ${{ github.sha }}.
+            APK built automatically from commit ${{ github.sha }}.
 
-            **TÃ©lÃ©chargement :** voir l'APK joint ci-dessous.
+            Download amaury-ouistiti.apk below.
 
-            **Installation sur Android :**
-            1. TÃ©lÃ©chargez `amaury-ouistiti.apk` sur votre tÃ©lÃ©phone
-            2. Ouvrez le fichier (autorisez l'installation depuis cette source si demandÃ©)
-            3. Suivez les Ã©tapes d'installation
+            How to install on Android:
+            1. Download the APK on your phone
+            2. Open the file (allow install from unknown sources if asked)
+            3. Follow installation steps
           files: project/android/app/build/outputs/apk/debug/amaury-ouistiti.apk
           draft: false
           prerelease: false
